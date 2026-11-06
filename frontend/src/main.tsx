@@ -12,8 +12,13 @@ const lang = (p: string) => /\.(cpp|cc|h|hpp|c)$/.test(p) ? 'cpp' : p.endsWith('
 const conf = () => ({ url: localStorage.getItem('url') || (import.meta.env.VITE_API_URL as string) || '', key: localStorage.getItem('key') || '' });
 async function api(p: string, init: RequestInit = {}) {
   const c = conf(); if (!c.url) throw new Error('Backend URL not set (Settings)');
-  const r = await fetch(c.url.replace(/\/$/, '') + p, { ...init, headers: { 'content-type': 'application/json', 'x-api-key': c.key } });
-  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+  const url = c.url.trim().replace(/\/$/, '') + p;
+  let r: Response;
+  try { r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', 'x-api-key': c.key.trim() } }); }
+  catch (e: any) { throw new Error('Cannot reach ' + url + ' (' + (e?.message || 'network/CORS') + ')'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(r.status + ' ' + (j.error || j.message || r.statusText || 'no message'));
+  return j;
 }
 const previewDoc = (js: string, wasm: string) => `<!doctype html><body style="margin:0;background:#000"><canvas id="c" style="width:100%;height:100%;touch-action:none" oncontextmenu="return false"></canvas><script>
 const b=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
