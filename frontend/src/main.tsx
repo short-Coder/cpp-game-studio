@@ -49,7 +49,7 @@ function App() {
   const ed = useRef<any>(null); const mon = useRef<any>(null); const loaded = useRef(false);
   const say = (s: string) => setLog(l => l + s + '\n');
 
-  useEffect(() => { get('project').then(v => { if (v) setFiles(v); loaded.current = true; }); }, []);
+  useEffect(() => { get('project').then(v => { if (v && Object.keys(v).length) setFiles(v); loaded.current = true; }); }, []);
   useEffect(() => { if (!loaded.current) return; const t = setTimeout(() => { set('project', files).then(() => setStatus('Saved locally')); setDirty(new Set()); }, 800); return () => clearTimeout(t); }, [files]);
   useEffect(() => { const h = (e: MessageEvent) => e.data?.log && say(e.data.log); window.addEventListener('message', h); return () => window.removeEventListener('message', h); }, []);
   useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); } if ((e.metaKey || e.ctrlKey) && e.key === 'b') { e.preventDefault(); build(); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
@@ -86,54 +86,54 @@ function App() {
   const markers = (d: Diag[]) => { const m = mon.current; if (!m) return; m.editor.getModels().forEach((mod: any) => { const f = mod.uri.path.replace(/^\//, ''); m.editor.setModelMarkers(mod, 'emcc', d.filter(x => f.endsWith(x.file.replace(/^\.\//, ''))).map(x => ({ startLineNumber: x.line, startColumn: x.col, endLineNumber: x.line, endColumn: x.col + 1, message: x.message, severity: x.severity === 'error' ? 8 : 4 }))); }); };
 
   const build = async () => {
-    if (building) return; setLog(''); setDiags([]); markers([]); setTab('console'); setStatus('Buildingâ¦');
+    if (building) return; setLog(''); setDiags([]); markers([]); setTab('console'); setStatus('Building...');
     try {
       const { id } = await api('/api/build', { method: 'POST', body: JSON.stringify({ files }) }); setBuilding(id);
       for (;;) {
         await new Promise(r => setTimeout(r, 1000));
-        const j = await api('/api/build/' + id); setLog(j.log || 'Compilingâ¦');
+        const j = await api('/api/build/' + id); setLog(j.log || 'Compiling...');
         if (j.status === 'running') continue;
         setBuilding(null); setDiags(j.diagnostics); markers(j.diagnostics);
-        if (j.status === 'done') { const r = await api('/api/build/' + id + '/result'); setDoc(previewDoc(r.js, r.wasm)); setGameKey(k => k + 1); setStatus('Build OK'); say('\nâ Build succeeded'); }
+        if (j.status === 'done') { const r = await api('/api/build/' + id + '/result'); setDoc(previewDoc(r.js, r.wasm)); setGameKey(k => k + 1); setStatus('Build OK'); say('\nBuild succeeded'); }
         else { setStatus('Build ' + j.status); if (j.diagnostics.length) setTab('errors'); }
         return;
       }
-    } catch (e: any) { setBuilding(null); setStatus('Build error'); say('â ' + e.message); alert('Build error: ' + e.message); }
+    } catch (e: any) { setBuilding(null); setStatus('Build error'); say('ERROR: ' + e.message); alert('Build error: ' + e.message); }
   };
   const cancel = async () => { if (building) { await api('/api/build/' + building + '/cancel', { method: 'POST' }).catch(() => {}); setBuilding(null); setStatus('Cancelled'); } };
-  const stop = () => { setDoc(''); say('â  Game stopped'); };
+  const stop = () => { setDoc(''); say('Game stopped'); };
   const settings = () => { const u = prompt('Backend URL (Railway)', conf().url); if (u !== null) localStorage.setItem('url', u); const k = prompt('API key', conf().key); if (k !== null) localStorage.setItem('key', k); };
   const goto = (d: Diag) => { const p = Object.keys(files).find(f => f.endsWith(d.file.replace(/^\.\//, ''))); if (p) { openFile(p); setTimeout(() => { ed.current?.revealLineInCenter(d.line); ed.current?.setPosition({ lineNumber: d.line, column: d.col }); }, 100); } };
 
   return <div className="app">
     <div className="top">
-      <b>â C++ Game Studio</b><span>MyGame</span>
-      <button onClick={save}>ð¾ Save</button>
-      <button onClick={() => ed.current?.trigger('k', 'undo')}>â¶</button><button onClick={() => ed.current?.trigger('k', 'redo')}>â·</button>
-      <button className="pri" onClick={build} disabled={!!building}>ð¨ Build & Run</button>
-      <button onClick={cancel} disabled={!building}>Cancel</button><button onClick={stop}>â  Stop</button>
-      <button onClick={() => setGameKey(k => k + 1)}>â» Restart</button>
+      <b>C++ Game Studio</b><span>MyGame</span>
+      <button onClick={save}>Save</button>
+      <button onClick={() => ed.current?.trigger('k', 'undo')}>Undo</button><button onClick={() => ed.current?.trigger('k', 'redo')}>Redo</button>
+      <button className="pri" onClick={build} disabled={!!building}>Build &amp; Run</button>
+      <button onClick={cancel} disabled={!building}>Cancel</button><button onClick={stop}>Stop</button>
+      <button onClick={() => setGameKey(k => k + 1)}>Restart</button>
       <button className={showPv ? 'on' : ''} onClick={() => setShowPv(!showPv)}>Preview</button>
-      <button onClick={() => setFs(Math.min(28, fs + 2))}>A+</button><button onClick={() => setFs(Math.max(10, fs - 2))}>Aâ</button>
-      <button onClick={settings}>â Settings</button><span>{status}</span>
+      <button onClick={() => setFs(Math.min(28, fs + 2))}>A+</button><button onClick={() => setFs(Math.max(10, fs - 2))}>A-</button>
+      <button onClick={settings}>Settings</button><span>{status}</span>
     </div>
     <div className="side">
       <div style={{ padding: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        <button onClick={newFile}>ï¼File</button><button onClick={newFolder}>ï¼Folder</button><button onClick={exportZip}>ZIPâ</button>
-        <label><button onClick={e => (e.currentTarget.nextSibling as HTMLInputElement).click()}>ZIPâ</button><input type="file" accept=".zip" hidden onChange={e => importZip(e.target.files?.[0])} /></label>
+        <button onClick={newFile}>+File</button><button onClick={newFolder}>+Folder</button><button onClick={exportZip}>ZIP Export</button>
+        <label><button onClick={e => (e.currentTarget.nextSibling as HTMLInputElement).click()}>ZIP Import</button><input type="file" accept=".zip" hidden onChange={e => importZip(e.target.files?.[0])} /></label>
         <button onClick={() => { if (confirm('Reset to sample project?')) { setFiles(SAMPLE); setSel(''); } }}>Reset</button>
       </div>
       {rows.map(({ p, dir }) => { const nm = p.split('/').pop(); const dp = p.split('/').length - 1; return <div key={(dir ? 'd:' : 'f:') + p} className={'file' + (!dir && p === active ? ' act' : '') + (dir && p === sel ? ' sel' : '')} style={{ paddingLeft: 10 + dp * 14 }}>
-        <span style={{ flex: 1 }} onClick={() => { if (dir) { setSel(p); setCollapsed(c => { const n = new Set(c); n.has(p) ? n.delete(p) : n.add(p); return n; }); } else openFile(p); }}>{dir ? (collapsed.has(p) ? 'â¸ ð ' : 'â¾ ð ') : (dirty.has(p) ? 'â ' : '')}{nm}</span>
-        <span onClick={() => rename(p, dir)}>â</span><span onClick={() => del(p, dir)}>ð</span></div>; })}
+        <span style={{ flex: 1 }} onClick={() => { if (dir) { setSel(p); setCollapsed(c => { const n = new Set(c); n.has(p) ? n.delete(p) : n.add(p); return n; }); } else openFile(p); }}>{dir ? (collapsed.has(p) ? '[+] ' : '[-] ') : (dirty.has(p) ? '* ' : '')}{nm}</span>
+        <span onClick={() => rename(p, dir)}>Rename</span><span onClick={() => del(p, dir)}>Del</span></div>; })}
     </div>
     <div className="ed">
-      <div className="tabs">{open.map(p => <div key={p} className={'tab' + (p === active ? ' act' : '')} onClick={() => setActive(p)}>{p.split('/').pop()}{dirty.has(p) ? ' â' : ''} <span onClick={e => { e.stopPropagation(); closeTab(p); }}>Ã</span></div>)}</div>
+      <div className="tabs">{open.map(p => <div key={p} className={'tab' + (p === active ? ' act' : '')} onClick={() => setActive(p)}>{p.split('/').pop()}{dirty.has(p) ? ' *' : ''} <span onClick={e => { e.stopPropagation(); closeTab(p); }}>x</span></div>)}</div>
       {active && files[active] !== undefined ? <Editor theme="vs-dark" path={active} language={lang(active)} value={files[active]} onChange={edit}
         onMount={(e, m) => { ed.current = e; mon.current = m; }} options={{ fontSize: fs, minimap: { enabled: false }, automaticLayout: true, bracketPairColorization: { enabled: true }, tabSize: 2, wordWrap: 'on' }} /> : <p style={{ padding: 20 }}>Open a file from the explorer.</p>}
     </div>
     {showPv && <div className={'pv' + (full ? ' full' : '')}>
-      <div style={{ display: 'flex', gap: 6, padding: 4, background: '#333' }}><button onClick={() => setFull(!full)}>{full ? 'Exit full' : 'â¶ Full'}</button></div>
+      <div style={{ display: 'flex', gap: 6, padding: 4, background: '#333' }}><button onClick={() => setFull(!full)}>{full ? 'Exit full' : 'Fullscreen'}</button></div>
       <iframe key={gameKey} title="game" sandbox="allow-scripts" srcDoc={doc} allow="fullscreen; autoplay" />
     </div>}
     <div className="bot">
