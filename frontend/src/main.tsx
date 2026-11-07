@@ -75,7 +75,8 @@ function App() {
         else { setStatus('Build ' + j.status); if (j.diagnostics.length) setTab('errors'); }
         return;
       }
-    } catch (e: any) { setBuilding(null); setStatus('Build error'); say('✖ ' + e.message); }
+    } catch (e: any) { setBuilding(null); setStatus('Build error'); say('✖ ' + e.message);
+                     alert('Build error: ' + e.message);}
   };
   const cancel = async () => { if (building) { await api('/api/build/' + building + '/cancel', { method: 'POST' }).catch(() => {}); setBuilding(null); setStatus('Cancelled'); } };
   const stop = () => { setDoc(''); say('■ Game stopped'); };
