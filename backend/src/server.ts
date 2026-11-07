@@ -7,11 +7,11 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
-const API_KEY = process.env.API_KEY || '';
+const KEYS = (process.env.API_KEYS || process.env.API_KEY || '').split(',').map(s => s.trim()).filter(Boolean);
 const DATA = process.env.DATA_DIR || '/data';
 const TIMEOUT_MS = Number(process.env.BUILD_TIMEOUT_MS || 120000);
 const MAX_BYTES = 2 * 1024 * 1024;
-if (!API_KEY) { console.error('API_KEY is required'); process.exit(1); }
+if (!KEYS.length) { console.error('API_KEYS is required'); process.exit(1); }
 
 const Files = z.record(z.string().regex(/^[A-Za-z0-9_./-]{1,200}$/).refine(p => !p.includes('..') && !p.startsWith('/')), z.string())
   .refine(f => Object.values(f).reduce((a, s) => a + s.length, 0) <= MAX_BYTES && Object.keys(f).length <= 200, 'project too large');
@@ -23,10 +23,10 @@ const jobs = new Map<string, Job>();
 
 const app = Fastify({ logger: true, bodyLimit: MAX_BYTES + 100000 });
 await app.register(cors, { origin: process.env.CORS_ORIGIN?.split(',') || true });
-await app.register(rateLimit, { max: 60, timeWindow: '1 minute' });
+await app.register(rateLimit, { max: 60, timeWindow: '1 minute', keyGenerator: (req) => String(req.headers['x-api-key'] || req.ip) });
 app.addHook('onRequest', async (req, reply) => {
   if (req.method === 'OPTIONS' || req.url === '/health') return;
-  if (req.headers['x-api-key'] !== API_KEY) reply.code(401).send({ error: 'unauthorized' });
+  if (!KEYS.includes(String(req.headers['x-api-key'] || ''))) reply.code(401).send({ error: 'unauthorized' });
 });
 app.get('/health', async () => ({ ok: true }));
 
