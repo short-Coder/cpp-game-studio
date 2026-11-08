@@ -71,8 +71,8 @@ app.post('/api/build', async (req, reply) => {
   await mkdir(path.join(dir, 'out'), { recursive: true });
   const incs = [...new Set(Object.keys(files).filter(f => /\.(h|hpp)$/.test(f)).map(f => path.dirname(f)).concat(['.', 'include']))].map(d => '-I' + d);
   const job: Job = { id, status: 'running', log: '', diags: [], dir };
-  const args = [...srcs, ...incs, '-O1', '-std=c++17', '-I/opt/raylib/src', '-L/opt/raylib/src', '-lraylib', '-DPLATFORM_WEB',
-    '-sUSE_GLFW=3', '-sASYNCIFY', '-sALLOW_MEMORY_GROWTH=1', '-sTOTAL_MEMORY=67108864', '-o', 'out/game.js'];
+  const args = [...srcs, ...incs, '-O1', '-std=c++20', '-Wall', '-fexceptions', '-I/opt/raylib/src', '-L/opt/raylib/src', '-lraylib', '-DPLATFORM_WEB',
+    '-sUSE_GLFW=3', '-sASYNCIFY', '-sALLOW_MEMORY_GROWTH=1', '-sTOTAL_MEMORY=67108864', '-sSTACK_SIZE=5242880', '-sEXIT_RUNTIME=1', '-o', 'out/game.js'];
   const proc = spawn('emcc', args, { cwd: dir, detached: true, env: { ...process.env, HOME: '/tmp' } });
   job.proc = proc; jobs.set(id, job);
   const add = (d: Buffer) => { job.log += d.toString(); if (job.log.length > 200000) job.log = job.log.slice(-200000); };
