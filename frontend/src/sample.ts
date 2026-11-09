@@ -32,6 +32,24 @@ void Player::update(float dt) {
 void Player::draw() { DrawCircle((int)x, (int)y, 20, MAROON); }
 `,
 'include/player.h': '#pragma once\nstruct Player { float x, y; void update(float dt); void draw(); };\n',
+'c/hello.c': `#include <stdio.h>
+
+/* C program: select this file and press "Run File" */
+int main(void) {
+    int hp = 100;
+    printf("%d\\n", hp);
+    hp = 80;  /* assignment */
+    printf("%d\\n", hp);
+
+    /* scanf needs input: a dialog will ask for it
+    int n;
+    printf("number? ");
+    scanf("%d", &n);
+    printf("you typed %d\\n", n * 2);
+    */
+    return 0;
+}
+`,
 'samples/3d_main.cpp.txt': `// Rename to src/main.cpp (and delete the 2D one) for a 3D demo.
 #include "raylib.h"
 int main() {
