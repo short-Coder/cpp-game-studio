@@ -9,7 +9,7 @@ import './style.css';
 type Files = Record<string, string>;
 type Diag = { file: string; line: number; col: number; severity: 'error' | 'warning'; message: string };
 type View = 'explorer' | 'search' | 'settings';
-const lang = (p: string) => /\.(cpp|cc|h|hpp|c)$/.test(p) ? 'cpp' : p.endsWith('.json') ? 'json' : p.endsWith('.md') ? 'markdown' : 'plaintext';
+const lang = (p: string) => p.endsWith('.c') ? 'c' : /\.(cpp|cc|h|hpp)$/.test(p) ? 'cpp' : p.endsWith('.json') ? 'json' : p.endsWith('.md') ? 'markdown' : 'plaintext';
 const ls = (k: string, d: string) => localStorage.getItem(k) ?? d;
 const conf = () => ({ url: ls('url', (import.meta.env.VITE_API_URL as string) || ''), key: ls('key', '') });
 async function api(p: string, init: RequestInit = {}) {
@@ -49,8 +49,21 @@ const SNIPS: [string, string][] = [
 const WORDS = ('std::cout std::cin std::endl std::cerr std::string std::vector std::map std::unordered_map std::set std::unordered_set std::array std::pair std::tuple std::optional std::variant std::function std::sort std::find std::move std::swap std::min std::max std::make_unique std::make_shared std::unique_ptr std::shared_ptr std::to_string std::stoi std::getline std::ostringstream std::chrono std::thread std::mutex std::runtime_error std::exception ' +
   'InitWindow CloseWindow WindowShouldClose BeginDrawing EndDrawing ClearBackground SetTargetFPS GetFrameTime DrawFPS DrawText DrawCircle DrawRectangle DrawLine DrawTexture LoadTexture IsKeyDown IsKeyPressed IsMouseButtonPressed GetMouseX GetMouseY GetTouchX GetTouchY GetTouchPointCount CheckCollisionRecs BeginMode3D EndMode3D DrawCube DrawGrid UpdateCamera').split(' ');
 let registered = false;
+const C_SNIPS: [string, string][] = [
+  ['main', 'int main(void) {\n\t${1}\n\treturn 0;\n}'], ['inc', '#include <${1:stdio.h}>'], ['printf', 'printf("${1:%d}\\n", ${2});'], ['scanf', 'scanf("${1:%d}", &${2:x});'],
+  ['for', 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ++${1:i}) {\n\t${3}\n}'], ['while', 'while (${1:cond}) {\n\t${2}\n}'], ['if', 'if (${1:cond}) {\n\t${2}\n}'],
+  ['ifelse', 'if (${1:cond}) {\n\t${2}\n} else {\n\t${3}\n}'], ['struct', 'struct ${1:Name} {\n\t${2}\n};'], ['typedef', 'typedef struct {\n\t${2}\n} ${1:Name};'],
+  ['malloc', '${1:int}* ${2:p} = (${1:int}*)malloc(${3:n} * sizeof(${1:int}));'], ['switch', 'switch (${1:x}) {\ncase ${2:0}:\n\t${3}\n\tbreak;\ndefault:\n\tbreak;\n}'],
+];
+const C_WORDS = 'printf scanf puts putchar getchar fgets fprintf sprintf snprintf malloc calloc realloc free memcpy memset strlen strcpy strncpy strcmp strcat atoi atof rand srand sqrt pow abs fabs sizeof NULL stdin stdout stderr size_t uint8_t uint32_t int64_t bool true false'.split(' ');
 function registerCpp(m: any) {
   if (registered) return; registered = true;
+  m.languages.registerCompletionItemProvider('c', {
+    provideCompletionItems: (model: any, pos: any) => {
+      const w = model.getWordUntilPosition(pos); const range = { startLineNumber: pos.lineNumber, endLineNumber: pos.lineNumber, startColumn: w.startColumn, endColumn: w.endColumn };
+      return { suggestions: [...C_SNIPS.map(([l, t]) => ({ label: l, kind: 27, insertText: t, insertTextRules: 4, range })), ...C_WORDS.map(l => ({ label: l, kind: 5, insertText: l, range }))] };
+    },
+  });
   m.languages.registerCompletionItemProvider('cpp', {
     triggerCharacters: [':', '.', '>'],
     provideCompletionItems: (model: any, pos: any) => {
@@ -99,7 +112,8 @@ function App() {
     const h = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey; if (!mod) return; const k = e.key.toLowerCase();
       if (k === 's') { e.preventDefault(); save(); }
-      else if (k === 'b' && !e.shiftKey) { e.preventDefault(); build(); }
+      else if (k === 'b' && !e.shiftKey) { e.preventDefault(); build(false); }
+      else if (k === 'enter') { e.preventDefault(); build(true); }
       else if (k === 'p') { e.preventDefault(); setPal({ text: e.shiftKey ? '>' : '', idx: 0 }); }
       else if (k === 'f' && e.shiftKey) { e.preventDefault(); setView('search'); }
     };
@@ -140,10 +154,10 @@ function App() {
   const importZip = async (f?: File) => { if (!f) return; const z = await JSZip.loadAsync(f); const n: Files = {}; for (const [p, e] of Object.entries(z.files)) if (!e.dir && OKPATH.test(p) && !p.includes('..') && (/\.(cpp|cc|c|h|hpp|txt|json|cmake|md)$/.test(p) || p.endsWith('.gitkeep'))) n[p] = await e.async('string'); if (!Object.keys(n).length) return alert('No supported files in ZIP'); setFiles(n); setOpen([]); setActive(''); };
   const markers = (d: Diag[]) => { const m = mon.current; if (!m) return; m.editor.getModels().forEach((mod: any) => { const f = mod.uri.path.replace(/^\//, ''); m.editor.setModelMarkers(mod, 'emcc', d.filter(x => f.endsWith(x.file.replace(/^\.\//, ''))).map(x => ({ startLineNumber: x.line, startColumn: x.col, endLineNumber: x.line, endColumn: x.col + 1, message: x.message, severity: x.severity === 'error' ? 8 : 4 }))); }); };
 
-  const build = async () => {
-    if (building) return; setLog(''); setDiags([]); markers([]); setTab('console'); setStatus('Building...');
+  const build = async (single = false) => {
+    if (building) return; if (single && !/\.(c|cpp|cc)$/.test(active)) return alert('Open a .c or .cpp file first'); setLog(''); setDiags([]); markers([]); setTab('console'); setStatus('Building...');
     try {
-      const { id } = await api('/api/build', { method: 'POST', body: JSON.stringify({ files }) }); setBuilding(id);
+      const { id } = await api('/api/build', { method: 'POST', body: JSON.stringify({ files, entry: single ? active : undefined }) }); setBuilding(id);
       for (;;) {
         await new Promise(r => setTimeout(r, 1000));
         const j = await api('/api/build/' + id); setLog(j.log || 'Compiling...');
@@ -159,7 +173,7 @@ function App() {
   const stop = () => { setDoc(''); say('Stopped'); };
 
   const cmds: [string, () => void][] = [
-    ['Build & Run', build], ['Stop', stop], ['Save', save], ['New File', newFile], ['New Folder', newFolder], ['Export ZIP', exportZip],
+    ['Run Current File (.c/.cpp only)', () => build(true)], ['Build Project (all files)', () => build(false)], ['Stop', stop], ['Save', save], ['New File', newFile], ['New Folder', newFolder], ['Export ZIP', exportZip],
     ['Toggle Preview', () => setShowPv(v => !v)], ['Toggle Minimap', () => { setMinimap(!minimap); persist('minimap', minimap ? '0' : '1'); }],
     ['Toggle Word Wrap', () => { setWrap(!wrap); persist('wrap', wrap ? '0' : '1'); }], ['Search in Files', () => setView('search')], ['Open Settings', () => setView('settings')],
     ['Format Document', () => ed.current?.getAction('editor.action.formatDocument')?.run()], ['Find and Replace', () => ed.current?.getAction('editor.action.startFindReplace')?.run()],
@@ -177,7 +191,7 @@ function App() {
       <b style={{ marginRight: 6 }}>C++ Game Studio</b>
       <button onClick={save}>Save</button>
       <button onClick={() => ed.current?.trigger('k', 'undo')}>Undo</button><button onClick={() => ed.current?.trigger('k', 'redo')}>Redo</button>
-      <button className="pri" onClick={build} disabled={!!building}>Build &amp; Run</button>
+      <button className="pri" onClick={() => build(true)} disabled={!!building}>Run File</button><button onClick={() => build(false)} disabled={!!building}>Build Project</button>
       <button onClick={cancel} disabled={!building}>Cancel</button><button onClick={stop}>Stop</button>
       <button onClick={() => setGameKey(k => k + 1)}>Restart</button>
       <button className={showPv ? 'on' : ''} onClick={() => setShowPv(!showPv)}>Preview</button>
@@ -236,7 +250,7 @@ function App() {
     </div>
     <div className="stat">
       <span>{building ? 'Building...' : status} | errors {errCount} warnings {warnCount}</span>
-      <span>Ln {pos.l}, Col {pos.c} | Spaces: 4 | UTF-8 | C++20</span>
+      <span>Ln {pos.l}, Col {pos.c} | Spaces: 4 | UTF-8 | {active.endsWith('.c') ? 'C17' : 'C++20'}</span>
     </div>
     {pal && <div className="ov" onClick={() => setPal(null)}><div className="pal" onClick={e => e.stopPropagation()}>
       <input autoFocus value={pal.text} placeholder="File name, or > for commands" onChange={e => setPal({ text: e.target.value, idx: 0 })}
