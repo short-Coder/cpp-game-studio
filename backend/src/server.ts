@@ -63,31 +63,41 @@ function parseDiags(log: string): Diag[] {
 }
 app.post('/api/build', async (req, reply) => {
   if ([...jobs.values()].filter(j => j.status === 'running').length >= Number(process.env.MAX_JOBS || 2)) { reply.code(429); return { error: 'build queue full, try again shortly' }; }
-  const { files } = z.object({ files: Files }).parse(req.body);
-  const srcs = Object.keys(files).filter(f => /\.(cpp|cc|c)$/.test(f));
+  const { files, entry } = z.object({ files: Files, entry: z.string().optional() }).parse(req.body);
+  let srcs = Object.keys(files).filter(f => /\.(cpp|cc|c)$/.test(f));
+  if (entry !== undefined) { if (!srcs.includes(entry)) { reply.code(400); return { error: 'entry must be an existing .c/.cpp file' }; } srcs = [entry]; }
   if (!srcs.length) { reply.code(400); return { error: 'no .cpp/.c files in project' }; }
   const id = randomUUID(); const dir = path.join('/tmp/work', id);
   for (const [p, c] of Object.entries(files)) { const fp = path.join(dir, p); await mkdir(path.dirname(fp), { recursive: true }); await writeFile(fp, c); }
   await mkdir(path.join(dir, 'out'), { recursive: true });
   const incs = [...new Set(Object.keys(files).filter(f => /\.(h|hpp)$/.test(f)).map(f => path.dirname(f)).concat(['.', 'include']))].map(d => '-I' + d);
   const job: Job = { id, status: 'running', log: '', diags: [], dir };
-  const args = [...srcs, ...incs, '-O1', '-std=c++20', '-Wall', '-fexceptions', '-I/opt/raylib/src', '-L/opt/raylib/src', '-lraylib', '-DPLATFORM_WEB',
-    '-sUSE_GLFW=3', '-sASYNCIFY', '-sALLOW_MEMORY_GROWTH=1', '-sTOTAL_MEMORY=67108864', '-sSTACK_SIZE=5242880', '-sEXIT_RUNTIME=1', '-o', 'out/game.js'];
-  const proc = spawn('emcc', args, { cwd: dir, detached: true, env: { ...process.env, HOME: '/tmp' } });
-  job.proc = proc; jobs.set(id, job);
+  jobs.set(id, job);
   const add = (d: Buffer) => { job.log += d.toString(); if (job.log.length > 200000) job.log = job.log.slice(-200000); };
-  proc.stdout.on('data', add); proc.stderr.on('data', add);
-  const timer = setTimeout(() => { job.log += '\n[timeout] build exceeded limit\n'; try { process.kill(-proc.pid!, 'SIGKILL'); } catch {} }, TIMEOUT_MS);
-  proc.on('close', async code => {
+  const runCmd = (args: string[]) => new Promise<number>(resolve => {
+    const proc = spawn('emcc', args, { cwd: dir, detached: true, env: { ...process.env, HOME: '/tmp' } });
+    job.proc = proc; proc.stdout.on('data', add); proc.stderr.on('data', add);
+    proc.on('error', () => resolve(1)); proc.on('close', code => resolve(code ?? 1));
+  });
+  const timer = setTimeout(() => { job.log += '\n[timeout] build exceeded limit\n'; job.status = 'failed'; try { process.kill(-job.proc!.pid!, 'SIGKILL'); } catch {} }, TIMEOUT_MS);
+  (async () => {
+    let ok = true; const objs: string[] = [];
+    for (let i = 0; i < srcs.length && ok; i++) {
+      const isC = srcs[i].endsWith('.c'); const o = 'out/' + i + '.o'; objs.push(o);
+      const lang = isC ? ['-std=c17'] : ['-std=c++20', '-fexceptions'];
+      ok = (await runCmd(['-c', srcs[i], '-o', o, '-O1', '-Wall', ...lang, ...incs, '-I/opt/raylib/src', '-DPLATFORM_WEB'])) === 0 && job.status === 'running';
+    }
+    if (ok) ok = (await runCmd([...objs, '-fexceptions', '-L/opt/raylib/src', '-lraylib', '-sUSE_GLFW=3', '-sASYNCIFY', '-sALLOW_MEMORY_GROWTH=1',
+      '-sTOTAL_MEMORY=67108864', '-sSTACK_SIZE=5242880', '-sEXIT_RUNTIME=1', '-o', 'out/game.js'])) === 0 && job.status === 'running';
     clearTimeout(timer); job.diags = parseDiags(job.log);
     if (job.status === 'cancelled') return;
-    if (code === 0) {
+    if (ok) {
       job.js = (await readFile(path.join(dir, 'out/game.js'))).toString('base64');
       job.wasm = (await readFile(path.join(dir, 'out/game.wasm'))).toString('base64'); job.status = 'done';
     } else job.status = 'failed';
     rm(dir, { recursive: true, force: true }).catch(() => {});
     setTimeout(() => jobs.delete(id), 10 * 60 * 1000);
-  });
+  })();
   reply.code(202); return { id };
 });
 const getJob = (id: string) => jobs.get(z.string().uuid().parse(id));
