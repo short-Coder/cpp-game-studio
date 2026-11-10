@@ -23,11 +23,13 @@ async function api(p: string, init: RequestInit = {}) {
   return j;
 }
 const OKPATH = /^[A-Za-z0-9_./-]+$/;
-const previewDoc = (js: string, wasm: string) => `<!doctype html><body style="margin:0;background:#000"><canvas id="c" style="width:100%;height:100%;touch-action:none" oncontextmenu="return false"></canvas><script>
+const previewDoc = (js: string, wasm: string, inp = '') => `<!doctype html><body style="margin:0;background:#000"><canvas id="c" style="width:100%;height:100%;touch-action:none" oncontextmenu="return false"></canvas><script>
 const b=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const w=URL.createObjectURL(new Blob([b("${wasm}")],{type:'application/wasm'}));
 const L=t=>parent.postMessage({log:String(t)},'*');
-window.Module={canvas:document.getElementById('c'),locateFile:()=>w,print:L,printErr:L,onAbort:t=>L('ABORT: '+t),
+var IN=${JSON.stringify(inp && !inp.endsWith('\n') ? inp + '\n' : inp).replace(/</g, '\\u003c')},ip=0;
+function SI(){if(ip>=IN.length){L('[waiting for input]');var l=prompt('Program is waiting for input (Cancel = end of input)');if(l===null)return null;IN=l+'\n';ip=0;L('[input] '+l);}return IN.charCodeAt(ip++);}
+window.Module={canvas:document.getElementById('c'),locateFile:()=>w,print:L,printErr:t=>L('[stderr] '+t),stdin:SI,onAbort:t=>L('ABORT: '+t),
 onExit:c=>L('[program exited with code '+c+']')};
 window.onerror=m=>L('JS error: '+m);
 const s=document.createElement('script');s.src=URL.createObjectURL(new Blob([b("${js}")],{type:'text/javascript'}));document.body.appendChild(s);
@@ -82,7 +84,8 @@ function App() {
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [log, setLog] = useState('');
   const [diags, setDiags] = useState<Diag[]>([]);
-  const [tab, setTab] = useState<'console' | 'errors'>('console');
+  const [tab, setTab] = useState<'console' | 'errors' | 'input'>('console');
+  const [stdin, setStdin] = useState('');
   const [doc, setDoc] = useState('');
   const [gameKey, setGameKey] = useState(0);
   const [full, setFull] = useState(false);
@@ -148,7 +151,15 @@ function App() {
   })();
   const results = query.length > 1 ? Object.entries(files).flatMap(([p, c]) => p.endsWith('.gitkeep') ? [] : c.split('\n').flatMap((l, i) => { const k = l.toLowerCase().indexOf(query.toLowerCase()); return k >= 0 ? [{ p, line: i + 1, col: k + 1, text: l.trim().slice(0, 80) }] : []; })).slice(0, 200) : [];
 
-  const save = async () => { await set('project', files); setStatus('Saved locally'); try { let id = localStorage.getItem('pid'); if (id) await api('/api/projects/' + id, { method: 'PUT', body: JSON.stringify({ name: 'MyGame', files }) }); else { id = (await api('/api/projects', { method: 'POST', body: JSON.stringify({ name: 'MyGame', files }) })).id; localStorage.setItem('pid', id!); } setStatus('Saved locally + server'); } catch (e: any) { setStatus('Local only (' + e.message + ')'); } };
+  const save = async () => {
+    await set('project', files); setStatus('Saved locally');
+    try {
+      const body = JSON.stringify({ name: 'MyGame', files }); let id = localStorage.getItem('pid');
+      if (id) { try { await api('/api/projects/' + id, { method: 'PUT', body }); } catch (e: any) { if (!String(e.message).startsWith('404')) throw e; id = null; } }
+      if (!id) { id = (await api('/api/projects', { method: 'POST', body })).id; localStorage.setItem('pid', id!); }
+      setStatus('Saved locally + server');
+    } catch (e: any) { setStatus('Local only (' + e.message + ')'); }
+  };
   const exportZip = async () => { const name = (prompt('ZIP file name', 'MyGame') || '').replace(/[^A-Za-z0-9_-]/g, ''); if (!name) return; const z = new JSZip(); Object.entries(files).forEach(([p, c]) => z.file(p, c)); const u = URL.createObjectURL(await z.generateAsync({ type: 'blob' })); const a = document.createElement('a'); a.href = u; a.download = name + '.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(u), 10000); };
   const importZip = async (f?: File) => { if (!f) return; const z = await JSZip.loadAsync(f); const n: Files = {}; for (const [p, e] of Object.entries(z.files)) if (!e.dir && OKPATH.test(p) && !p.includes('..') && (/\.(cpp|cc|c|h|hpp|txt|json|cmake|md)$/.test(p) || p.endsWith('.gitkeep'))) n[p] = await e.async('string'); if (!Object.keys(n).length) return alert('No supported files in ZIP'); setFiles(n); setOpen([]); setActive(''); };
   const markers = (d: Diag[]) => { const m = mon.current; if (!m) return; m.editor.getModels().forEach((mod: any) => { const f = mod.uri.path.replace(/^\//, ''); m.editor.setModelMarkers(mod, 'emcc', d.filter(x => f.endsWith(x.file.replace(/^\.\//, ''))).map(x => ({ startLineNumber: x.line, startColumn: x.col, endLineNumber: x.line, endColumn: x.col + 1, message: x.message, severity: x.severity === 'error' ? 8 : 4 }))); }); };
@@ -156,13 +167,13 @@ function App() {
   const build = async (single = false) => {
     if (building) return; if (single && !/\.(c|cpp|cc)$/.test(active)) return alert('Open a .c or .cpp file first'); setLog(''); setDiags([]); markers([]); setTab('console'); setStatus('Building...');
     try {
-      const { id } = await api('/api/build', { method: 'POST', body: JSON.stringify({ files, entry: single ? active : undefined }) }); setBuilding(id);
+      const { id } = await api('/api/build', { method: 'POST', body: JSON.stringify({ files, entry: active, single }) }); setBuilding(id);
       for (;;) {
         await new Promise(r => setTimeout(r, 1000));
         const j = await api('/api/build/' + id); setLog(j.log || 'Compiling...');
         if (j.status === 'running') continue;
         setBuilding(null); setDiags(j.diagnostics); markers(j.diagnostics);
-        if (j.status === 'done') { const r = await api('/api/build/' + id + '/result'); setDoc(previewDoc(r.js, r.wasm)); setGameKey(k => k + 1); setStatus('Build OK'); say('\nBuild succeeded. Program output:'); }
+        if (j.status === 'done') { const r = await api('/api/build/' + id + '/result'); setDoc(previewDoc(r.js, r.wasm, stdin)); setGameKey(k => k + 1); setStatus('Build OK'); say('\nBuild succeeded. Program output:'); }
         else { setStatus('Build ' + j.status); if (j.diagnostics.some((d: Diag) => d.severity === 'error')) setTab('errors'); }
         return;
       }
@@ -243,9 +254,9 @@ function App() {
     </div>}
     <div className="bot">
       <div className="tabs"><div className={'tab' + (tab === 'console' ? ' act' : '')} onClick={() => setTab('console')}>Console / Output</div>
-        <div className={'tab' + (tab === 'errors' ? ' act' : '')} onClick={() => setTab('errors')}>Problems ({diags.length})</div></div>
+        <div className={'tab' + (tab === 'errors' ? ' act' : '')} onClick={() => setTab('errors')}>Problems ({diags.length})</div><div className={'tab' + (tab === 'input' ? ' act' : '')} onClick={() => setTab('input')}>Input (stdin)</div></div>
       {tab === 'console' ? <pre className="log">{log || 'Press "Build & Run". Console programs: put code inside int main().'}</pre>
-        : <pre className="log">{diags.map((d, i) => <div key={i} className="err" style={{ color: d.severity === 'error' ? '#f48771' : '#cca700' }} onClick={() => revealAt(Object.keys(files).find(f => f.endsWith(d.file.replace(/^\.\//, ''))) || active, d.line, d.col)}>{d.severity} {d.file}:{d.line}:{d.col} {d.message}</div>)}</pre>}
+        : tab === 'errors' ? <pre className="log">{diags.map((d, i) => <div key={i} className="err" style={{ color: d.severity === 'error' ? '#f48771' : '#cca700' }} onClick={() => revealAt(Object.keys(files).find(f => f.endsWith(d.file.replace(/^\.\//, ''))) || active, d.line, d.col)}>{d.severity} {d.file}:{d.line}:{d.col} {d.message}</div>)}</pre> : <textarea value={stdin} onChange={e => setStdin(e.target.value)} placeholder={'Text for std::cin / scanf, one line per input. If it runs out, a dialog asks for more.'} style={{ flex: 1, margin: 8, fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 13 }} />}
     </div>
     <div className="stat">
       <span>{building ? 'Building...' : status} | errors {errCount} warnings {warnCount}</span>
