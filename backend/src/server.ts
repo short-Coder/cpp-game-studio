@@ -88,7 +88,7 @@ app.post('/api/build', async (req, reply) => {
       ok = (await runCmd(['-c', srcs[i], '-o', o, '-O1', '-Wall', ...lang, ...incs, '-I/opt/raylib/src', '-DPLATFORM_WEB'])) === 0 && job.status === 'running';
     }
     if (ok) ok = (await runCmd([...objs, '-fexceptions', '-L/opt/raylib/src', '-lraylib', '-sUSE_GLFW=3', '-sASYNCIFY', '-sALLOW_MEMORY_GROWTH=1',
-      '-sTOTAL_MEMORY=67108864', '-sSTACK_SIZE=5242880', '-sEXIT_RUNTIME=1', '-o', 'out/game.js'])) === 0 && job.status === 'running';
+      '-sTOTAL_MEMORY=67108864', '-sSTACK_SIZE=5242880', '-sEXIT_RUNTIME=1', '-sFORCE_FILESYSTEM=1', '-o', 'out/game.js'])) === 0 && job.status === 'running';
     clearTimeout(timer); job.diags = parseDiags(job.log);
     if (job.status === 'cancelled') return;
     if (ok) {
