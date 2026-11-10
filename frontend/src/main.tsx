@@ -28,7 +28,7 @@ const b=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const w=URL.createObjectURL(new Blob([b("${wasm}")],{type:'application/wasm'}));
 const L=t=>parent.postMessage({log:String(t)},'*');
 var IN=${JSON.stringify(inp && !inp.endsWith('\n') ? inp + '\n' : inp).replace(/</g, '\\u003c')},ip=0;
-function SI(){if(ip>=IN.length){L('[waiting for input]');var l=prompt('Program is waiting for input (Cancel = end of input)');if(l===null)return null;IN=l+'\n';ip=0;L('[input] '+l);}return IN.charCodeAt(ip++);}
+function SI(){if(ip>=IN.length){L('[waiting for input]');var l=prompt('Program is waiting for input (Cancel = end of input)');if(l===null)return null;IN=l+'\\n';ip=0;L('[input] '+l);}return IN.charCodeAt(ip++);}
 window.Module={canvas:document.getElementById('c'),locateFile:()=>w,print:L,printErr:t=>L('[stderr] '+t),stdin:SI,onAbort:t=>L('ABORT: '+t),
 onExit:c=>L('[program exited with code '+c+']')};
 window.onerror=m=>L('JS error: '+m);
